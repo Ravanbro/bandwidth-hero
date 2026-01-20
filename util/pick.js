@@ -1,18 +1,23 @@
-// Since only single function required from lodash or underscore, writing it self
-
+/**
+ * Pick specific keys from an object.
+ * @param {Object} obj - Source object
+ * @param {string|string[]} keys - Key(s) to pick
+ * @returns {Object} New object with only the specified keys
+ */
 module.exports = (obj, keys) => {
-	const new_obj = {};
+    const result = {};
 
-	if(!obj)	obj={};
-	if( ! Array.isArray(keys) ){
-		keys = [keys];	// convert to array
-	}
+    if (!obj) {
+        return result;
+    }
 
-	for (const key in obj) {
-		if (Object.hasOwnProperty.call(obj, key) && keys.includes(key)) {
-			new_obj[key] = obj[key];
-		}
-	}
+    const keyList = Array.isArray(keys) ? keys : [keys];
 
-	return new_obj;
+    for (const key of keyList) {
+        if (Object.hasOwnProperty.call(obj, key)) {
+            result[key] = obj[key];
+        }
+    }
+
+    return result;
 };
