@@ -4,10 +4,11 @@ const shouldCompress = require("../util/shouldCompress");
 const compress = require("../util/compress");
 
 const DEFAULT_QUALITY = 40;
+const BMI_PROXY_REGEX = /http:\/\/1\.1\.\d\.\d\/bmi\/(https?:\/\/)?/i;
 
-exports.handler = async (event, context) => {
-    let { url } = event.queryStringParameters;
-    const { jpeg, bw, l } = event.queryStringParameters;
+exports.handler = async (event) => {
+    let { url } = event.queryStringParameters || {};
+    const { jpeg, bw, l } = event.queryStringParameters || {};
 
     if (!url) {
         return {
@@ -17,93 +18,82 @@ exports.handler = async (event, context) => {
     }
 
     try {
-        url = JSON.parse(url);  // if simple string, then will remain so 
-    } catch { }
+        url = JSON.parse(url);
+    } catch {
+        // URL is already a plain string, no parsing needed
+    }
 
     if (Array.isArray(url)) {
         url = url.join("&url=");
     }
 
-    // by now, url is a string
-    url = url.replace(/http:\/\/1\.1\.\d\.\d\/bmi\/(https?:\/\/)?/i, "http://");
+    // Remove BMI proxy prefix if present
+    url = url.replace(BMI_PROXY_REGEX, "http://");
 
     const webp = !jpeg;
-    const grayscale = bw != 0;
+    const grayscale = bw !== "0" && Boolean(bw);
     const quality = parseInt(l, 10) || DEFAULT_QUALITY;
 
     try {
-        let response_headers = {};
-        const fetchResult = await fetch(url, {
+        const fetchResponse = await fetch(url, {
             headers: {
-                ...pick(event.headers, ['cookie', 'dnt', 'referer']),
-                'user-agent': 'Bandwidth-Hero Compressor',
-                'x-forwarded-for': event.headers['x-forwarded-for'] || event.ip,
-                via: '1.1 bandwidth-hero'
+                ...pick(event.headers, ["cookie", "dnt", "referer"]),
+                "user-agent": "Bandwidth-Hero Compressor",
+                "x-forwarded-for": event.headers["x-forwarded-for"] || event.ip || "",
+                via: "1.1 bandwidth-hero"
             }
-        }).then(async res => {
-            if (!res.ok) {
-                return {
-                    error: true,
-                    statusCode: res.status || 302
-                }
-            }
+        });
 
-            response_headers = Object.fromEntries(res.headers.entries());
+        if (!fetchResponse.ok) {
             return {
-                data: await res.buffer(),
-                type: res.headers.get("content-type") || ""
-            }
-        })
-
-        if (fetchResult.error) {
-            return {
-                statusCode: fetchResult.statusCode,
-                body: `Upstream server returned ${fetchResult.statusCode}`
-            }
+                statusCode: fetchResponse.status || 302,
+                body: `Upstream server returned ${fetchResponse.status}`
+            };
         }
 
-        const { data, type: originType } = fetchResult;
+        const responseHeaders = Object.fromEntries(fetchResponse.headers.entries());
+        const data = await fetchResponse.buffer();
+        const originType = fetchResponse.headers.get("content-type") || "";
         const originSize = data.length;
 
         if (shouldCompress(originType, originSize)) {
-            const { err, output, headers } = await compress(data, webp, grayscale, quality, originSize);   // compress
+            const { err, output, headers } = await compress(data, webp, grayscale, quality, originSize);
 
             if (err) {
-                console.log("Conversion failed: ", url);
+                console.error("Compression failed:", url);
                 throw err;
             }
 
-            console.log(`From ${originSize}, Saved: ${(originSize - output.length)/originSize}%`);
-            const encoded_output = output.toString('base64');
+            const savedPercent = ((originSize - output.length) / originSize * 100).toFixed(1);
+            console.log(`Compressed: ${originSize} -> ${output.length} bytes (saved ${savedPercent}%)`);
+
             return {
                 statusCode: 200,
-                body: encoded_output,
-                isBase64Encoded: true,  // note: The final size we receive is `originSize` only, maybe it is decoding it server side, because at client side i do get the decoded image directly
-                // "content-length": encoded_output.length,     // this doesn't have any effect, this header contains the actual data size, (decrypted binary data size, not the base64 version)
-                headers: {
-                    "content-encoding": "identity",
-                    ...response_headers,
-                    ...headers
-                }
-            }
-        } else {
-            console.log("Bypassing... Size: " , data.length);
-            return {    // bypass
-                statusCode: 200,
-                body: data.toString('base64'),
+                body: output.toString("base64"),
                 isBase64Encoded: true,
                 headers: {
                     "content-encoding": "identity",
-                    // "x-proxy-bypass": '1',
-                    ...response_headers,
+                    ...responseHeaders,
+                    ...headers
                 }
-            }
+            };
         }
+
+        console.log(`Bypassing compression, size: ${data.length} bytes`);
+        return {
+            statusCode: 200,
+            body: data.toString("base64"),
+            isBase64Encoded: true,
+            headers: {
+                "content-encoding": "identity",
+                ...responseHeaders
+            }
+        };
     } catch (err) {
-        console.error(err);
+        console.error("Request failed:", err);
         return {
             statusCode: 500,
-            body: err.message || ""
-        }
+            body: err.message || "Internal server error"
+        };
     }
-}
+};
