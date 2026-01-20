@@ -65,7 +65,7 @@ exports.handler = async (event, context) => {
         const { data, type: originType } = fetchResult;
         const originSize = data.length;
 
-        if (shouldCompress(originType, originSize, webp)) {
+        if (shouldCompress(originType, originSize)) {
             const { err, output, headers } = await compress(data, webp, grayscale, quality, originSize);   // compress
 
             if (err) {
