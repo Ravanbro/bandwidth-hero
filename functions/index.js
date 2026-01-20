@@ -33,7 +33,7 @@ exports.handler = async (event, context) => {
 
     try {
         let response_headers = {};
-        const { data, type: originType } = await fetch(url, {
+        const fetchResult = await fetch(url, {
             headers: {
                 ...pick(event.headers, ['cookie', 'dnt', 'referer']),
                 'user-agent': 'Bandwidth-Hero Compressor',
@@ -43,17 +43,26 @@ exports.handler = async (event, context) => {
         }).then(async res => {
             if (!res.ok) {
                 return {
+                    error: true,
                     statusCode: res.status || 302
                 }
             }
 
-            response_headers = res.headers;
+            response_headers = Object.fromEntries(res.headers.entries());
             return {
                 data: await res.buffer(),
                 type: res.headers.get("content-type") || ""
             }
         })
 
+        if (fetchResult.error) {
+            return {
+                statusCode: fetchResult.statusCode,
+                body: `Upstream server returned ${fetchResult.statusCode}`
+            }
+        }
+
+        const { data, type: originType } = fetchResult;
         const originSize = data.length;
 
         if (shouldCompress(originType, originSize, webp)) {
